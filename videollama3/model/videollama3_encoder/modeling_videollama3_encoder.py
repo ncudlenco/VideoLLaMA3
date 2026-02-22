@@ -305,6 +305,11 @@ class VisionFlashAttention2(VisionAttention):
         key_states = apply_rotary_pos_emb_vision(key_states.unsqueeze(0), rotary_pos_emb).squeeze(0)
         
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+        # Cast to bf16/fp16 for flash attention (QLoRA LoRA adapters output fp32)
+        if query_states.dtype not in (torch.float16, torch.bfloat16):
+            query_states = query_states.to(torch.bfloat16)
+            key_states = key_states.to(torch.bfloat16)
+            value_states = value_states.to(torch.bfloat16)
         attn_output = flash_attn_varlen_func(query_states, key_states, value_states, cu_seqlens, cu_seqlens, max_seqlen, max_seqlen).reshape(
             q_len, -1
         )

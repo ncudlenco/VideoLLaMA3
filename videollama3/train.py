@@ -492,7 +492,7 @@ def train(attn_implementation=None):
     if training_args.bits in [4, 8]:
         from transformers import BitsAndBytesConfig
         bnb_model_from_pretrained_args.update(dict(
-            # device_map={"": training_args.device},
+            device_map="auto",
             # BUG: High version transformers report error:
             # ValueError: You can't pass `load_in_4bit`or `load_in_8bit` as a kwarg when passing `quantization_config` argument at the same time
             # load_in_4bit=training_args.bits == 4,
@@ -500,7 +500,7 @@ def train(attn_implementation=None):
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=training_args.bits == 4,
                 load_in_8bit=training_args.bits == 8,
-                llm_int8_skip_modules=["mm_projector"],
+                llm_int8_skip_modules=["mm_projector", "vision_encoder"],
                 llm_int8_threshold=6.0,
                 llm_int8_has_fp16_weight=False,
                 bnb_4bit_compute_dtype=compute_dtype,
@@ -515,6 +515,10 @@ def train(attn_implementation=None):
     config._attn_implementation = attn_implementation
     config.use_token_compression = model_args.use_token_compression
     config.use_flash_loss = model_args.use_flash_loss
+    # Untie lm_head from embed_tokens for 4-bit quantization compatibility.
+    # Tied weights cause lm_head to lose quant_state when bitsandbytes quantizes embed_tokens.
+    if training_args.bits in [4, 8]:
+        config.tie_word_embeddings = False
 
     if model_args.vision_encoder is not None:
         config.vision_encoder = model_args.vision_encoder
