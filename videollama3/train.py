@@ -57,6 +57,24 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 local_rank = None
 
 
+def load_video_by_indices(video_path, frame_indices, video_fps=60):
+    """Load specific frames by index using decord (for hybrid sampling).
+
+    Returns frames and timestamps in the same format as load_video():
+      frames: numpy array (N, C, H, W)
+      timestamps: list of float (seconds)
+    """
+    import numpy as np
+    from decord import VideoReader, cpu
+    vr = VideoReader(video_path, ctx=cpu(0), num_threads=2)
+    max_idx = len(vr) - 1
+    safe_indices = [min(idx, max_idx) for idx in frame_indices]
+    frames = vr.get_batch(safe_indices).asnumpy()   # (N, H, W, C)
+    frames = frames.transpose(0, 3, 1, 2)           # (N, C, H, W)
+    timestamps = [idx / video_fps for idx in safe_indices]
+    return frames, timestamps
+
+
 def rank0_print(*args):
     if local_rank == 0:
         print(*args)
@@ -119,6 +137,8 @@ class DataArguments:
     image_aspect_ratio: str = 'square'
     use_batch_flattening: bool = field(default=True, metadata={"help": "Whether to flatten the in-batch sequences of variable lengths."})
     dataset_cache_dir: Optional[str] = field(default=None)
+    sampling: Optional[str] = field(default="uniform", metadata={"help": "Frame sampling: 'uniform' or 'hybrid' (use frame_indices from JSONL)."})
+
 
 
 @dataclass
@@ -254,7 +274,13 @@ class LazySupervisedDataset(Dataset):
             video_file = data_dict['video']
             if isinstance(video_file, list) and len(video_file) == 1:
                 video_file = os.path.join(data_folder, video_file[0])
-                images, timestamps = load_video(video_file, fps=self.data_args.fps, max_frames=self.data_args.max_frames)
+                use_hybrid = (getattr(self.data_args, 'sampling', 'uniform') == 'hybrid')
+                if use_hybrid and 'frame_indices' in data_dict and data_dict['frame_indices']:
+                    video_fps = data_dict.get('video_fps', 60)
+                    images, timestamps = load_video_by_indices(
+                        video_file, data_dict['frame_indices'], video_fps)
+                else:
+                    images, timestamps = load_video(video_file, fps=self.data_args.fps, max_frames=self.data_args.max_frames)
                 images = [images]
             else:
                 raise ValueError(f"Unsupported video format: {video_file}")
