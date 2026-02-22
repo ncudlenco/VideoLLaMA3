@@ -572,8 +572,14 @@ def train(attn_implementation=None):
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        rank0_print("Adding LoRA adapters...")
-        model = get_peft_model(model, lora_config)
+        if training_args.lora_weight_path:
+            # Stage 2: load pretrained adapter
+            from peft import PeftModel
+            rank0_print(f"Loading pretrained LoRA adapter from {training_args.lora_weight_path}...")
+            model = PeftModel.from_pretrained(model, training_args.lora_weight_path, is_trainable=True)
+        else:
+            rank0_print("Adding LoRA adapters...")
+            model = get_peft_model(model, lora_config)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_path,
